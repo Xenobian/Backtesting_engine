@@ -33,6 +33,10 @@ class Backtest:
 
         #total premium decay
         self.totalDecay     = 0
+
+        #Slippage %
+        self.slippage       = 2
+
     def sortDates(self):
         files = os.listdir(self.folder_path)
 
@@ -71,8 +75,9 @@ class Backtest:
         #filtering out all non minimum expiry date options
         self.current_data = self.current_data[self.current_data['expiry_date'] == minimumExpiryDate]
 
-        #filtering out all values greater than given exit time 
-        self.current_data = self.current_data[self.current_data['time'] < self.exit_time]
+        #filtering out all values greater than given exit time + 1
+        self.current_data = self.current_data[self.current_data['time'] <= self.exit_time]
+
     def resampleFrequency(self):
         """
         resample data from 1 minute to 5 minute 15 minute etc
@@ -148,14 +153,17 @@ class Backtest:
         new_df['supertrend'] = TA.supertrend(new_df['combined_HIGH'], new_df['combined_LOW'], new_df['combined_CLOSE'], length=10, multiplier=3)['SUPERT_10_3.0']
         new_df['Buy_signal'] = 0
         new_df['Sell_signal'] = 0
+
         n= 10
         for i in range(n,len(new_df)):
             if new_df['combined_CLOSE'][i-1] < new_df['supertrend'][i-1] and new_df['combined_CLOSE'][i] > new_df['supertrend'][i]:
-                new_df['Buy_signal'][i] = 1
+                #new_df['Buy_signal'][i] = 1 moving buy signal to next days candle
+                new_df['Buy_signal'][i+1] = 1
             if new_df['combined_CLOSE'][i-1] > new_df['supertrend'][i-1] and new_df['combined_CLOSE'][i] < new_df['supertrend'][i]:
-                new_df['Sell_signal'][i-1] = 1
+                #new_df['Sell_signal'][i-1] = 1 moving sell signal to next days candle
+                new_df['Sell_signal'][i] = 1
     
-        selected_columns = ['datetime' , 'time_x','ticker_x', 'ticker_y' ,'combined_CLOSE', 'supertrend', 'Buy_signal', 'Sell_signal']
+        selected_columns = ['datetime' , 'time_x','ticker_x', 'ticker_y' ,'combined_CLOSE', 'combined_OPEN', 'supertrend', 'Buy_signal', 'Sell_signal']
 
         self.finalDF  = new_df[selected_columns]
 
@@ -164,7 +172,7 @@ class Backtest:
         find the trades per day and analyze P&L
         '''
         #exit_row = self.finalDF[365:366]
-        exit_row = self.finalDF[self.finalDF['time_x'] == time(15, 10)]
+        exit_row = self.finalDF[self.finalDF['time_x'] == time(15, 11)]
 
         #find all the buy and sell signals
         self.AnalyticsDF = self.finalDF[(self.finalDF['Buy_signal'] == 1) | (self.finalDF['Sell_signal'] == 1)]
@@ -194,7 +202,6 @@ class Backtest:
 
         # sell buy  sell buy  | if even and 1st is sell do nothing
         
-
         # buy  sell buy  sell | if even and 1st is buy remove first buy and add exit time candle as buy  given sell signal not at exit time  
         elif row_count % 2 == 0 and self.AnalyticsDF.loc[0]['Buy_signal'] == 1 and exit_row.head(1)['Sell_signal'].item() != 1:
             self.AnalyticsDF = self.AnalyticsDF.drop(0)
@@ -205,7 +212,7 @@ class Backtest:
         elif row_count % 2 == 0 and self.AnalyticsDF.loc[0]['Buy_signal'] == 1 and exit_row.head(1)['Sell_signal'].item() == 1:
             self.AnalyticsDF = self.AnalyticsDF.iloc[:-1]
 
-        #self.AnalyticsDF.to_csv('output/' + date + '.csv')
+        self.AnalyticsDF.to_csv('output/' + date + '.csv')
         
 
     def PLreport(self, date):
@@ -218,9 +225,13 @@ class Backtest:
         for index, row in self.AnalyticsDF.iterrows():
             result = 0
             if index % 2 == 0:
-                result += row['combined_CLOSE']  
+                #adding selling premium after subracting slippage
+                result += (row['combined_OPEN']  - (row['combined_OPEN']*self.slippage/100))
+                
             else:
-                result -= row['combined_CLOSE']  
+                #subtracting buying premium premium after adding slippage
+                result -= (row['combined_OPEN']  + (row['combined_OPEN']*self.slippage/100))
+                
             
             trades.append(result)
             trade_count += 1

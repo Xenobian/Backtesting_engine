@@ -5,3 +5,5 @@
 2> add both the options 
 3> get supertrend on that
 4> SL to be on overall postion based on buy signal 
+
+slippage % both buy 0.5 % and next candle open
